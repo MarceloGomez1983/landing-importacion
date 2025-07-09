@@ -264,17 +264,32 @@
                         const result = await response.json();
                         if (result.candidates && result.candidates[0]?.content?.parts?.[0]) {
                             let rawText = result.candidates[0].content.parts[0].text;
-                            // Robust JSON parsing
-                            const jsonMatch = rawText.match(/\[.*\]/s);
-                            if (jsonMatch) {
-                                const jsonString = jsonMatch[0];
+                            // **NUEVA LÓGICA DE PARSEO ROBUSTA**
+                            let jsonString = rawText;
+                            const markdownMatch = rawText.match(/```(json)?\s*(\[.*\])\s*```/s);
+                            if (markdownMatch && markdownMatch[2]) {
+                                jsonString = markdownMatch[2];
+                            } else {
+                                const arrayMatch = rawText.match(/\[.*\]/s);
+                                if (arrayMatch) {
+                                    jsonString = arrayMatch[0];
+                                } else {
+                                    throw new Error('No se encontró un array JSON válido en la respuesta de la IA.');
+                                }
+                            }
+
+                            try {
                                 const extractedProducts = JSON.parse(jsonString);
                                 let productsAddedCount = 0;
                                 extractedProducts.forEach(p => { if(addProduct(p)) productsAddedCount++; });
                                 renderTable();
                                 aiStatus.textContent = `¡Éxito! Se agregaron ${productsAddedCount} productos a la tabla.`;
                                 DOMElements.aiFileInput.value = '';
-                            } else { throw new Error('No se encontró un array JSON en la respuesta de la IA.'); }
+                            } catch (parseError) {
+                                console.error("JSON Parsing Error:", parseError, "Raw text was:", rawText);
+                                throw new Error('La respuesta de la IA no tenía el formato JSON esperado.');
+                            }
+
                         } else { throw new Error('Respuesta inesperada de la API de Gemini.'); }
                     } catch (error) {
                         console.error('Error analyzing proforma:', error);
