@@ -16,6 +16,16 @@
     <!-- SheetJS (xlsx.js) para leer archivos de Excel -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 
+    <!-- PDF.js para procesar archivos PDF -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.102/pdf.min.js"></script>
+    <script>
+        // **CORRECCIÓN:** Configurar el worker de PDF.js inmediatamente después de cargar la librería
+        // para asegurar que `pdfjsLib` esté definido.
+        if (window.pdfjsLib) {
+            window.pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.102/pdf.worker.min.js`;
+        }
+    </script>
+    
     <!-- Favicon (Icono de la pestaña) -->
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🚢</text></svg>">
 
@@ -240,6 +250,10 @@
 
             async function handleAnalyzeProforma() {
                 if (API_KEY === 'TU_CLAVE_DE_API_AQUI') { alert('ERROR: Por favor, configurá tu clave de API de Google en el archivo HTML.'); return; }
+                if (typeof pdfjsLib === 'undefined') {
+                    alert('Error: La librería para procesar PDF no se cargó correctamente. Por favor, recargá la página.');
+                    return;
+                }
                 const file = DOMElements.aiFileInput.files[0];
                 if (!file) { alert('Por favor, seleccioná un archivo de proforma para analizar.'); return; }
                 const analyzeBtnText = document.getElementById('analyzeBtnText');
@@ -249,74 +263,101 @@
                 analyzeBtnText.textContent = 'Analizando...';
                 analyzeSpinner.classList.remove('hidden');
                 aiStatus.textContent = 'Leyendo archivo...';
-                const reader = new FileReader();
-                reader.readAsDataURL(file);
-                reader.onloadend = async () => {
-                    try {
-                        const base64Data = reader.result.split(',')[1];
-                        const mimeType = file.type;
-                        aiStatus.textContent = 'Contactando a la IA, esto puede tardar unos segundos...';
+
+                try {
+                    let fileParts = [];
+                    if (file.type === "application/pdf") {
+                        aiStatus.textContent = 'Procesando PDF... (esto puede tardar un poco)';
+                        const fileReader = new FileReader();
+                        fileReader.readAsArrayBuffer(file);
+                        await new Promise((resolve, reject) => {
+                            fileReader.onload = resolve;
+                            fileReader.onerror = reject;
+                        });
                         
-                        // **NUEVA LÓGICA DE SOLICITUD CON SCHEMA**
-                        const prompt = `Tu tarea es analizar la imagen o documento de una factura proforma y extraer los productos. Debes responder *únicamente* con un array de objetos JSON. Cada objeto debe tener estas claves: "codigo" (string, si no existe usa null), "descripcion" (string), "cantidad" (number), "fob" (number), "ncm" (string, si no existe usa null). Es CRÍTICO que tu respuesta sea solo el array JSON. Si el archivo es ilegible o no contiene productos, tu ÚNICA respuesta debe ser un array vacío: []. No incluyas explicaciones, texto adicional, ni markdown.`;
-                        const schema = {
-                            type: "ARRAY",
-                            items: {
-                                type: "OBJECT",
-                                properties: {
-                                    "codigo": { "type": "STRING" },
-                                    "descripcion": { "type": "STRING" },
-                                    "cantidad": { "type": "NUMBER" },
-                                    "fob": { "type": "NUMBER" },
-                                    "ncm": { "type": "STRING" }
-                                },
-                                required: ["descripcion", "cantidad", "fob"]
-                            }
-                        };
-
-                        const payload = { 
-                            contents: [{ role: "user", parts: [ { text: prompt }, { inlineData: { mimeType: mimeType, data: base64Data } } ] }],
-                            generationConfig: {
-                                responseMimeType: "application/json",
-                                responseSchema: schema
-                            }
-                        };
-                        const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${API_KEY}`;
-                        const response = await fetch(apiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-                        if (!response.ok) { throw new Error(`La solicitud a la API falló con estado ${response.status}`); }
-                        const result = await response.json();
-
-                        if (result.candidates && result.candidates[0]?.content?.parts?.[0]) {
-                            const jsonString = result.candidates[0].content.parts[0].text;
-                            try {
-                                const extractedProducts = JSON.parse(jsonString);
-                                if (Array.isArray(extractedProducts)) {
-                                    if (extractedProducts.length === 0) {
-                                        aiStatus.textContent = 'La IA analizó el archivo pero no encontró productos para agregar.';
-                                    } else {
-                                        let productsAddedCount = 0;
-                                        extractedProducts.forEach(p => { if(addProduct(p)) productsAddedCount++; });
-                                        renderTable();
-                                        aiStatus.textContent = `¡Éxito! Se agregaron ${productsAddedCount} productos a la tabla.`;
-                                        DOMElements.aiFileInput.value = '';
-                                    }
-                                } else {
-                                     throw new Error('La respuesta de la IA no es un array, incluso con schema.');
-                                }
-                            } catch (parseError) {
-                                console.error("JSON Parsing Error:", parseError, "Raw text was:", jsonString);
-                                throw new Error('La respuesta de la IA no tenía el formato JSON esperado.');
-                            }
-                        } else { throw new Error('Respuesta inesperada de la API de Gemini.'); }
-                    } catch (error) {
-                        console.error('Error analyzing proforma:', error);
-                        aiStatus.textContent = `Error: No se pudo analizar el archivo. (Detalle: ${error.message})`;
-                    } finally {
-                        DOMElements.analyzeBtn.disabled = false;
-                        analyzeBtnText.textContent = 'Analizar Archivo';
-                        analyzeSpinner.classList.add('hidden');
+                        const pdf = await pdfjsLib.getDocument(fileReader.result).promise;
+                        for (let i = 1; i <= pdf.numPages; i++) {
+                            aiStatus.textContent = `Convirtiendo página ${i} de ${pdf.numPages} a imagen...`;
+                            const page = await pdf.getPage(i);
+                            const viewport = page.getViewport({ scale: 2.0 });
+                            const canvas = document.createElement('canvas');
+                            const context = canvas.getContext('2d');
+                            canvas.height = viewport.height;
+                            canvas.width = viewport.width;
+                            await page.render({ canvasContext: context, viewport: viewport }).promise;
+                            const base64Data = canvas.toDataURL('image/jpeg').split(',')[1];
+                            fileParts.push({ inlineData: { mimeType: 'image/jpeg', data: base64Data } });
+                        }
+                    } else {
+                        const reader = new FileReader();
+                        reader.readAsDataURL(file);
+                        await new Promise((resolve, reject) => {
+                           reader.onloadend = resolve;
+                           reader.onerror = reject;
+                        });
+                        const base64Data = reader.result.split(',')[1];
+                        fileParts.push({ inlineData: { mimeType: file.type, data: base64Data } });
                     }
-                };
+
+                    aiStatus.textContent = 'Contactando a la IA, esto puede tardar unos segundos...';
+                    const prompt = `Tu tarea es analizar la/s siguiente/s imagen/es de una factura proforma y extraer los productos. Debes responder *únicamente* con un array de objetos JSON. Cada objeto debe tener estas claves: "codigo" (string, si no existe usa null), "descripcion" (string), "cantidad" (number), "fob" (number), "ncm" (string, si no existe usa null). Es CRÍTICO que tu respuesta sea solo el array JSON. Si el archivo es ilegible o no contiene productos, tu ÚNICA respuesta debe ser un array vacío: []. No incluyas explicaciones, texto adicional, ni markdown.`;
+                    const schema = {
+                        type: "ARRAY",
+                        items: {
+                            type: "OBJECT",
+                            properties: {
+                                "codigo": { "type": "STRING" },
+                                "descripcion": { "type": "STRING" },
+                                "cantidad": { "type": "NUMBER" },
+                                "fob": { "type": "NUMBER" },
+                                "ncm": { "type": "STRING" }
+                            },
+                            required: ["descripcion", "cantidad", "fob"]
+                        }
+                    };
+
+                    const payload = { 
+                        contents: [{ role: "user", parts: [ { text: prompt }, ...fileParts ] }],
+                        generationConfig: {
+                            responseMimeType: "application/json",
+                            responseSchema: schema
+                        }
+                    };
+                    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${API_KEY}`;
+                    const response = await fetch(apiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                    if (!response.ok) { throw new Error(`La solicitud a la API falló con estado ${response.status}`); }
+                    const result = await response.json();
+
+                    if (result.candidates && result.candidates[0]?.content?.parts?.[0]) {
+                        const jsonString = result.candidates[0].content.parts[0].text;
+                        try {
+                            const extractedProducts = JSON.parse(jsonString);
+                            if (Array.isArray(extractedProducts)) {
+                                if (extractedProducts.length === 0) {
+                                    aiStatus.textContent = 'La IA analizó el archivo pero no encontró productos para agregar.';
+                                } else {
+                                    let productsAddedCount = 0;
+                                    extractedProducts.forEach(p => { if(addProduct(p)) productsAddedCount++; });
+                                    renderTable();
+                                    aiStatus.textContent = `¡Éxito! Se agregaron ${productsAddedCount} productos a la tabla.`;
+                                    DOMElements.aiFileInput.value = '';
+                                }
+                            } else {
+                                 throw new Error('La respuesta de la IA no es un array, incluso con schema.');
+                            }
+                        } catch (parseError) {
+                            console.error("JSON Parsing Error:", parseError, "Raw text was:", jsonString);
+                            throw new Error('La respuesta de la IA no tenía el formato JSON esperado.');
+                        }
+                    } else { throw new Error('Respuesta inesperada de la API de Gemini.'); }
+                } catch (error) {
+                    console.error('Error analyzing proforma:', error);
+                    aiStatus.textContent = `Error: No se pudo analizar el archivo. (Detalle: ${error.message})`;
+                } finally {
+                    DOMElements.analyzeBtn.disabled = false;
+                    analyzeBtnText.textContent = 'Analizar Archivo';
+                    analyzeSpinner.classList.add('hidden');
+                }
             }
 
             function handleFormSubmit(event) {
