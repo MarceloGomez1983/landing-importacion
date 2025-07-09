@@ -256,9 +256,9 @@
                         const base64Data = reader.result.split(',')[1];
                         const mimeType = file.type;
                         aiStatus.textContent = 'Contactando a la IA, esto puede tardar unos segundos...';
-                        const prompt = `Analiza la siguiente imagen o documento de una factura proforma. Extrae todos los productos listados y devuelve un array de objetos JSON. Cada objeto debe tener las siguientes claves: "codigo" (string, si no existe usar null), "descripcion" (string), "cantidad" (number), "fob" (number, el valor unitario o total), "ncm" (string, si no existe usar null). Responde únicamente con el array JSON, sin texto adicional, markdown o explicaciones.`;
                         
                         // **NUEVA LÓGICA DE SOLICITUD CON SCHEMA**
+                        const prompt = `Analiza la siguiente imagen o documento de una factura proforma. Extrae todos los productos listados y devuelve un array de objetos JSON. Cada objeto debe tener las siguientes claves: "codigo" (string, si no existe usar null), "descripcion" (string), "cantidad" (number), "fob" (number, el valor unitario o total), "ncm" (string, si no existe usar null). Si no encuentras ningún producto o no puedes analizar el archivo, responde únicamente con un array vacío: []. Responde únicamente con el array JSON, sin texto adicional, markdown o explicaciones.`;
                         const schema = {
                             type: "ARRAY",
                             items: {
@@ -290,14 +290,18 @@
                             const jsonString = result.candidates[0].content.parts[0].text;
                             try {
                                 const extractedProducts = JSON.parse(jsonString);
-                                let productsAddedCount = 0;
-                                extractedProducts.forEach(p => { if(addProduct(p)) productsAddedCount++; });
-                                renderTable();
-                                aiStatus.textContent = `¡Éxito! Se agregaron ${productsAddedCount} productos a la tabla.`;
-                                DOMElements.aiFileInput.value = '';
+                                if (Array.isArray(extractedProducts)) {
+                                    let productsAddedCount = 0;
+                                    extractedProducts.forEach(p => { if(addProduct(p)) productsAddedCount++; });
+                                    renderTable();
+                                    aiStatus.textContent = `¡Éxito! Se agregaron ${productsAddedCount} productos a la tabla.`;
+                                    DOMElements.aiFileInput.value = '';
+                                } else {
+                                     throw new Error('La respuesta de la IA no es un array, incluso con schema.');
+                                }
                             } catch (parseError) {
                                 console.error("JSON Parsing Error:", parseError, "Raw text was:", jsonString);
-                                throw new Error('La respuesta de la IA no tenía el formato JSON esperado, incluso con schema.');
+                                throw new Error('La respuesta de la IA no tenía el formato JSON esperado.');
                             }
                         } else { throw new Error('Respuesta inesperada de la API de Gemini.'); }
                     } catch (error) {
