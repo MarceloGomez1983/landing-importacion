@@ -172,11 +172,154 @@
             // --- DOM Element Cache ---
             const DOMElements = {};
 
-            // --- Functions (declared with let to allow re-assignment after init) ---
-            let renderTable, addProduct, handleManualAdd, handleExcelUpload, handleDownloadTemplate, 
-                handleSuggestNcm, handleAnalyzeProforma, switchTab, handleFormSubmit;
+            // --- Functions (declared as function expressions) ---
+            const renderTable = () => {
+                DOMElements.productTableBody.innerHTML = '';
+                if (productList.length === 0) { DOMElements.productTableBody.appendChild(DOMElements.emptyRow); } 
+                else {
+                    productList.forEach((product, index) => {
+                        const row = document.createElement('tr');
+                        row.className = 'border-b';
+                        row.innerHTML = `<td class="p-3">${product.descripcion}</td><td class="p-3">${product.cantidad}</td><td class="p-3">${product.fob}</td><td class="p-3">${product.ncm || 'N/A'}</td><td class="p-3"><button type="button" data-index="${index}" class="delete-btn text-red-500 hover:text-red-700 font-semibold">Eliminar</button></td>`;
+                        DOMElements.productTableBody.appendChild(row);
+                    });
+                }
+            };
+            const addProduct = (product) => {
+                if (!product.descripcion || !product.cantidad || !product.fob) { console.warn('Producto incompleto omitido:', product); return false; }
+                productList.push(product);
+                return true;
+            };
+            const handleManualAdd = () => {
+                const newProduct = { codigo: document.getElementById('manual_codigo').value, descripcion: document.getElementById('manual_descripcion').value, cantidad: document.getElementById('manual_cantidad').value, fob: document.getElementById('manual_fob').value, ncm: document.getElementById('manual_ncm').value };
+                if(addProduct(newProduct)) {
+                    document.getElementById('manual_codigo').value = ''; document.getElementById('manual_descripcion').value = ''; document.getElementById('manual_cantidad').value = ''; document.getElementById('manual_fob').value = ''; document.getElementById('manual_ncm').value = '';
+                }
+                renderTable();
+            };
+            const switchTab = (tabKey) => {
+                Object.keys(DOMElements.tabs).forEach(key => {
+                    const isActive = key === tabKey;
+                    DOMElements.tabs[key].btn.classList.toggle('active', isActive);
+                    DOMElements.tabs[key].panel.classList.toggle('hidden', !isActive);
+                });
+            };
+            const handleSuggestNcm = async () => {
+                const description = document.getElementById('manual_descripcion').value;
+                if (!description.trim()) {
+                    alert('Por favor, ingresá una descripción del producto para sugerir el NCM.');
+                    return;
+                }
+                const sparkleIcon = document.getElementById('sparkle-icon');
+                const spinnerIcon = document.getElementById('spinner-icon');
+                DOMElements.suggestNcmBtn.disabled = true;
+                sparkleIcon.classList.add('hidden');
+                spinnerIcon.classList.remove('hidden');
+                const prompt = `Basado en la siguiente descripción de un producto para importar a Argentina, ¿cuál es el código NCM (Nomenclatura Común del Mercosur) de 8 dígitos más probable? Responde únicamente con el código en formato XXXX.XX.XX, sin ningún texto adicional. Descripción: "${description}"`;
+                try {
+                    // Using gemini-pro for this text-only task for stability
+                    const payload = { 
+                        contents: [{ role: "user", parts: [{ text: prompt }] }],
+                        generationConfig: {
+                            "temperature": 0.2,
+                            "maxOutputTokens": 50
+                        }
+                    };
+                    const apiKey = "";
+                    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${apiKey}`;
+                    const response = await fetch(apiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                    if (!response.ok) { throw new Error(`API request failed with status ${response.status}`); }
+                    const result = await response.json();
+                    if (result.candidates && result.candidates[0]?.content?.parts?.[0]) {
+                        let text = result.candidates[0].content.parts[0].text;
+                        const ncmMatch = text.match(/\d{4}\.\d{2}\.\d{2}/);
+                        if (ncmMatch) { document.getElementById('manual_ncm').value = ncmMatch[0]; } 
+                        else { alert('La IA no pudo determinar un código NCM válido. Por favor, intentá con una descripción más detallada.'); }
+                    } else { throw new Error('Respuesta inesperada de la API de Gemini.'); }
+                } catch (error) {
+                    console.error('Error fetching NCM suggestion:', error);
+                    alert('Hubo un error al contactar al servicio de IA. Por favor, intentá de nuevo más tarde.');
+                } finally {
+                    DOMElements.suggestNcmBtn.disabled = false;
+                    spinnerIcon.classList.add('hidden');
+                    sparkleIcon.classList.remove('hidden');
+                }
+            };
+            const handleAnalyzeProforma = async () => {
+                const file = DOMElements.aiFileInput.files[0];
+                if (!file) { alert('Por favor, seleccioná un archivo de proforma para analizar.'); return; }
+                const analyzeBtnText = document.getElementById('analyzeBtnText');
+                const analyzeSpinner = document.getElementById('analyzeSpinner');
+                const aiStatus = document.getElementById('ai-status');
+                DOMElements.analyzeBtn.disabled = true;
+                analyzeBtnText.textContent = 'Analizando...';
+                analyzeSpinner.classList.remove('hidden');
+                aiStatus.textContent = 'Leyendo archivo...';
+                const reader = new FileReader();
+                reader.readAsDataURL(file);
+                reader.onloadend = async () => {
+                    try {
+                        const base64Data = reader.result.split(',')[1];
+                        const mimeType = file.type;
+                        aiStatus.textContent = 'Contactando a la IA, esto puede tardar unos segundos...';
+                        const prompt = `Analiza la siguiente imagen o documento de una factura proforma. Extrae todos los productos listados y devuelve un array de objetos JSON. Cada objeto debe tener las siguientes claves: "codigo" (string, si no existe usar null), "descripcion" (string), "cantidad" (number), "fob" (number, el valor unitario o total), "ncm" (string, si no existe usar null). Responde únicamente con el array JSON, sin texto adicional, markdown o explicaciones.`;
+                        const schema = { type: "ARRAY", items: { type: "OBJECT", properties: { "codigo": { "type": "STRING" }, "descripcion": { "type": "STRING" }, "cantidad": { "type": "NUMBER" }, "fob": { "type": "NUMBER" }, "ncm": { "type": "STRING" } }, required: ["descripcion", "cantidad", "fob"] } };
+                        const payload = { contents: [{ role: "user", parts: [ { text: prompt }, { inlineData: { mimeType: mimeType, data: base64Data } } ] }], generationConfig: { responseMimeType: "application/json", responseSchema: schema } };
+                        const apiKey = "";
+                        const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+                        const response = await fetch(apiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                        if (!response.ok) { throw new Error(`API request failed with status ${response.status}`); }
+                        const result = await response.json();
+                        if (result.candidates && result.candidates[0]?.content?.parts?.[0]) {
+                            const extractedProducts = JSON.parse(result.candidates[0].content.parts[0].text);
+                            let productsAddedCount = 0;
+                            extractedProducts.forEach(p => { if(addProduct(p)) productsAddedCount++; });
+                            renderTable();
+                            aiStatus.textContent = `¡Éxito! Se agregaron ${productsAddedCount} productos a la tabla.`;
+                            DOMElements.aiFileInput.value = '';
+                        } else { throw new Error('Respuesta inesperada de la API de Gemini.'); }
+                    } catch (error) {
+                        console.error('Error analyzing proforma:', error);
+                        aiStatus.textContent = 'Error: No se pudo analizar el archivo. Intentá con una imagen más clara.';
+                    } finally {
+                        DOMElements.analyzeBtn.disabled = false;
+                        analyzeBtnText.textContent = 'Analizar Archivo';
+                        analyzeSpinner.classList.add('hidden');
+                    }
+                };
+            };
+            const handleFormSubmit = (event) => {
+                event.preventDefault();
+                if (SCRIPT_URL === 'URL_DE_TU_APPS_SCRIPT_AQUI') { alert('ERROR: Por favor, configurá la URL de Google Apps Script en el archivo HTML.'); return; }
+                if (productList.length === 0) { alert('Por favor, agregá al menos un producto para cotizar.'); return; }
+                DOMElements.submitBtn.disabled = true; DOMElements.submitBtn.textContent = 'Enviando...'; DOMElements.errorMessage.classList.add('hidden');
+                const formData = { nombre: document.getElementById('nombre').value, email: document.getElementById('email').value, observaciones: document.getElementById('observaciones').value, productos: productList };
+                fetch(SCRIPT_URL, { method: 'POST', mode: 'no-cors', cache: 'no-cache', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(formData) })
+                .then(() => { DOMElements.form.classList.add('hidden'); DOMElements.successMessage.classList.remove('hidden'); DOMElements.successMessage.scrollIntoView({ behavior: 'smooth', block: 'center' }); })
+                .catch(error => { console.error('Error:', error); DOMElements.errorMessage.classList.remove('hidden'); })
+                .finally(() => { DOMElements.submitBtn.disabled = false; DOMElements.submitBtn.textContent = 'Enviar y Recibir Presupuesto'; });
+            };
+            const handleDownloadTemplate = () => { const headers = ["Codigo Producto", "Descripcion", "Cantidad", "Valor FOB (USD)", "NCM"]; const csvContent = "data:text/csv;charset=utf-8," + headers.join(",") + "\n"; const encodedUri = encodeURI(csvContent); const link = document.createElement("a"); link.setAttribute("href", encodedUri); link.setAttribute("download", "plantilla_importacion.csv"); document.body.appendChild(link); link.click(); document.body.removeChild(link); };
+            const handleExcelUpload = (event) => {
+                const file = event.target.files[0]; if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    try {
+                        const data = new Uint8Array(e.target.result); const workbook = XLSX.read(data, { type: 'array' }); const sheetName = workbook.SheetNames[0]; const worksheet = workbook.Sheets[sheetName]; const json = XLSX.utils.sheet_to_json(worksheet);
+                        if (json.length === 0) { alert('El archivo Excel está vacío o tiene un formato incorrecto.'); return; }
+                        const newProducts = json.map(row => ({ codigo: row['Codigo Producto'], descripcion: row['Descripcion'], cantidad: row['Cantidad'], fob: row['Valor FOB (USD)'], ncm: row['NCM'] }));
+                        let productsAddedCount = 0;
+                        newProducts.forEach(p => { if(addProduct(p)) productsAddedCount++; });
+                        renderTable();
+                        alert(`${productsAddedCount} productos fueron agregados exitosamente.`);
+                    } catch (error) { console.error("Error processing Excel file:", error); alert("Hubo un error al procesar el archivo. Asegurate que el formato sea el correcto."); }
+                };
+                reader.readAsArrayBuffer(file); 
+                event.target.value = '';
+            };
 
-            // --- Initialization Function ---
+
+            // --- Start the application ---
             function init() {
                 // 1. Cache static DOM elements
                 DOMElements.form = document.getElementById('cotizacionForm');
@@ -220,147 +363,6 @@
                 DOMElements.form.addEventListener('submit', handleFormSubmit);
             }
 
-            // --- Function Implementations ---
-            renderTable = () => {
-                DOMElements.productTableBody.innerHTML = '';
-                if (productList.length === 0) { DOMElements.productTableBody.appendChild(DOMElements.emptyRow); } 
-                else {
-                    productList.forEach((product, index) => {
-                        const row = document.createElement('tr');
-                        row.className = 'border-b';
-                        row.innerHTML = `<td class="p-3">${product.descripcion}</td><td class="p-3">${product.cantidad}</td><td class="p-3">${product.fob}</td><td class="p-3">${product.ncm || 'N/A'}</td><td class="p-3"><button type="button" data-index="${index}" class="delete-btn text-red-500 hover:text-red-700 font-semibold">Eliminar</button></td>`;
-                        DOMElements.productTableBody.appendChild(row);
-                    });
-                }
-            };
-            addProduct = (product) => {
-                if (!product.descripcion || !product.cantidad || !product.fob) { console.warn('Producto incompleto omitido:', product); return false; }
-                productList.push(product);
-                return true;
-            };
-            handleManualAdd = () => {
-                const newProduct = { codigo: document.getElementById('manual_codigo').value, descripcion: document.getElementById('manual_descripcion').value, cantidad: document.getElementById('manual_cantidad').value, fob: document.getElementById('manual_fob').value, ncm: document.getElementById('manual_ncm').value };
-                if(addProduct(newProduct)) {
-                    document.getElementById('manual_codigo').value = ''; document.getElementById('manual_descripcion').value = ''; document.getElementById('manual_cantidad').value = ''; document.getElementById('manual_fob').value = ''; document.getElementById('manual_ncm').value = '';
-                }
-                renderTable();
-            };
-            switchTab = (tabKey) => {
-                Object.keys(DOMElements.tabs).forEach(key => {
-                    const isActive = key === tabKey;
-                    DOMElements.tabs[key].btn.classList.toggle('active', isActive);
-                    DOMElements.tabs[key].panel.classList.toggle('hidden', !isActive);
-                });
-            };
-            handleSuggestNcm = async () => {
-                const description = document.getElementById('manual_descripcion').value;
-                if (!description.trim()) {
-                    alert('Por favor, ingresá una descripción del producto para sugerir el NCM.');
-                    return;
-                }
-                const sparkleIcon = document.getElementById('sparkle-icon');
-                const spinnerIcon = document.getElementById('spinner-icon');
-                DOMElements.suggestNcmBtn.disabled = true;
-                sparkleIcon.classList.add('hidden');
-                spinnerIcon.classList.remove('hidden');
-                const prompt = `Basado en la siguiente descripción de un producto para importar a Argentina, ¿cuál es el código NCM (Nomenclatura Común del Mercosur) de 8 dígitos más probable? Responde únicamente con el código en formato XXXX.XX.XX, sin ningún texto adicional. Descripción: "${description}"`;
-                try {
-                    const payload = { contents: [{ role: "user", parts: [{ text: prompt }] }] };
-                    const apiKey = "";
-                    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
-                    const response = await fetch(apiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-                    if (!response.ok) { throw new Error(`API request failed with status ${response.status}`); }
-                    const result = await response.json();
-                    if (result.candidates && result.candidates[0]?.content?.parts?.[0]) {
-                        let text = result.candidates[0].content.parts[0].text;
-                        const ncmMatch = text.match(/\d{4}\.\d{2}\.\d{2}/);
-                        if (ncmMatch) { document.getElementById('manual_ncm').value = ncmMatch[0]; } 
-                        else { alert('La IA no pudo determinar un código NCM válido. Por favor, intentá con una descripción más detallada.'); }
-                    } else { throw new Error('Respuesta inesperada de la API de Gemini.'); }
-                } catch (error) {
-                    console.error('Error fetching NCM suggestion:', error);
-                    alert('Hubo un error al contactar al servicio de IA. Por favor, intentá de nuevo más tarde.');
-                } finally {
-                    DOMElements.suggestNcmBtn.disabled = false;
-                    spinnerIcon.classList.add('hidden');
-                    sparkleIcon.classList.remove('hidden');
-                }
-            };
-            handleAnalyzeProforma = async () => {
-                const file = DOMElements.aiFileInput.files[0];
-                if (!file) { alert('Por favor, seleccioná un archivo de proforma para analizar.'); return; }
-                const analyzeBtnText = document.getElementById('analyzeBtnText');
-                const analyzeSpinner = document.getElementById('analyzeSpinner');
-                const aiStatus = document.getElementById('ai-status');
-                DOMElements.analyzeBtn.disabled = true;
-                analyzeBtnText.textContent = 'Analizando...';
-                analyzeSpinner.classList.remove('hidden');
-                aiStatus.textContent = 'Leyendo archivo...';
-                const reader = new FileReader();
-                reader.readAsDataURL(file);
-                reader.onloadend = async () => {
-                    try {
-                        const base64Data = reader.result.split(',')[1];
-                        const mimeType = file.type;
-                        aiStatus.textContent = 'Contactando a la IA, esto puede tardar unos segundos...';
-                        const prompt = `Analiza la siguiente imagen o documento de una factura proforma. Extrae todos los productos listados y devuelve un array de objetos JSON. Cada objeto debe tener las siguientes claves: "codigo" (string, si no existe usar null), "descripcion" (string), "cantidad" (number), "fob" (number, el valor unitario o total), "ncm" (string, si no existe usar null). Responde únicamente con el array JSON, sin texto adicional, markdown o explicaciones.`;
-                        const schema = { type: "ARRAY", items: { type: "OBJECT", properties: { "codigo": { "type": "STRING" }, "descripcion": { "type": "STRING" }, "cantidad": { "type": "NUMBER" }, "fob": { "type": "NUMBER" }, "ncm": { "type": "STRING" } }, required: ["descripcion", "cantidad", "fob"] } };
-                        const payload = { contents: [{ role: "user", parts: [ { text: prompt }, { inlineData: { mimeType: mimeType, data: base64Data } } ] }], generationConfig: { responseMimeType: "application/json", responseSchema: schema } };
-                        const apiKey = "";
-                        const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
-                        const response = await fetch(apiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-                        if (!response.ok) { throw new Error(`API request failed with status ${response.status}`); }
-                        const result = await response.json();
-                        if (result.candidates && result.candidates[0]?.content?.parts?.[0]) {
-                            const extractedProducts = JSON.parse(result.candidates[0].content.parts[0].text);
-                            let productsAddedCount = 0;
-                            extractedProducts.forEach(p => { if(addProduct(p)) productsAddedCount++; });
-                            renderTable();
-                            aiStatus.textContent = `¡Éxito! Se agregaron ${productsAddedCount} productos a la tabla.`;
-                            DOMElements.aiFileInput.value = '';
-                        } else { throw new Error('Respuesta inesperada de la API de Gemini.'); }
-                    } catch (error) {
-                        console.error('Error analyzing proforma:', error);
-                        aiStatus.textContent = 'Error: No se pudo analizar el archivo. Intentá con una imagen más clara.';
-                    } finally {
-                        DOMElements.analyzeBtn.disabled = false;
-                        analyzeBtnText.textContent = 'Analizar Archivo';
-                        analyzeSpinner.classList.add('hidden');
-                    }
-                };
-            };
-            handleFormSubmit = (event) => {
-                event.preventDefault();
-                if (SCRIPT_URL === 'URL_DE_TU_APPS_SCRIPT_AQUI') { alert('ERROR: Por favor, configurá la URL de Google Apps Script en el archivo HTML.'); return; }
-                if (productList.length === 0) { alert('Por favor, agregá al menos un producto para cotizar.'); return; }
-                DOMElements.submitBtn.disabled = true; DOMElements.submitBtn.textContent = 'Enviando...'; DOMElements.errorMessage.classList.add('hidden');
-                const formData = { nombre: document.getElementById('nombre').value, email: document.getElementById('email').value, observaciones: document.getElementById('observaciones').value, productos: productList };
-                fetch(SCRIPT_URL, { method: 'POST', mode: 'no-cors', cache: 'no-cache', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(formData) })
-                .then(() => { DOMElements.form.classList.add('hidden'); DOMElements.successMessage.classList.remove('hidden'); DOMElements.successMessage.scrollIntoView({ behavior: 'smooth', block: 'center' }); })
-                .catch(error => { console.error('Error:', error); DOMElements.errorMessage.classList.remove('hidden'); })
-                .finally(() => { DOMElements.submitBtn.disabled = false; DOMElements.submitBtn.textContent = 'Enviar y Recibir Presupuesto'; });
-            };
-            handleDownloadTemplate = () => { const headers = ["Codigo Producto", "Descripcion", "Cantidad", "Valor FOB (USD)", "NCM"]; const csvContent = "data:text/csv;charset=utf-8," + headers.join(",") + "\n"; const encodedUri = encodeURI(csvContent); const link = document.createElement("a"); link.setAttribute("href", encodedUri); link.setAttribute("download", "plantilla_importacion.csv"); document.body.appendChild(link); link.click(); document.body.removeChild(link); };
-            handleExcelUpload = (event) => {
-                const file = event.target.files[0]; if (!file) return;
-                const reader = new FileReader();
-                reader.onload = (e) => {
-                    try {
-                        const data = new Uint8Array(e.target.result); const workbook = XLSX.read(data, { type: 'array' }); const sheetName = workbook.SheetNames[0]; const worksheet = workbook.Sheets[sheetName]; const json = XLSX.utils.sheet_to_json(worksheet);
-                        if (json.length === 0) { alert('El archivo Excel está vacío o tiene un formato incorrecto.'); return; }
-                        const newProducts = json.map(row => ({ codigo: row['Codigo Producto'], descripcion: row['Descripcion'], cantidad: row['Cantidad'], fob: row['Valor FOB (USD)'], ncm: row['NCM'] }));
-                        let productsAddedCount = 0;
-                        newProducts.forEach(p => { if(addProduct(p)) productsAddedCount++; });
-                        renderTable();
-                        alert(`${productsAddedCount} productos fueron agregados exitosamente.`);
-                    } catch (error) { console.error("Error processing Excel file:", error); alert("Hubo un error al procesar el archivo. Asegurate que el formato sea el correcto."); }
-                };
-                reader.readAsArrayBuffer(file); 
-                event.target.value = '';
-            };
-
-
-            // --- Start the application ---
             init();
         });
     </script>
