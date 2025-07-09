@@ -264,18 +264,16 @@
                         const result = await response.json();
                         if (result.candidates && result.candidates[0]?.content?.parts?.[0]) {
                             let rawText = result.candidates[0].content.parts[0].text;
+                            
                             // **NUEVA LÓGICA DE PARSEO ROBUSTA**
-                            let jsonString = rawText;
-                            const markdownMatch = rawText.match(/```(json)?\s*(\[.*\])\s*```/s);
-                            if (markdownMatch && markdownMatch[2]) {
-                                jsonString = markdownMatch[2];
+                            let jsonString = null;
+                            const startIndex = rawText.indexOf('[');
+                            const endIndex = rawText.lastIndexOf(']');
+
+                            if (startIndex !== -1 && endIndex !== -1 && endIndex > startIndex) {
+                                jsonString = rawText.substring(startIndex, endIndex + 1);
                             } else {
-                                const arrayMatch = rawText.match(/\[.*\]/s);
-                                if (arrayMatch) {
-                                    jsonString = arrayMatch[0];
-                                } else {
-                                    throw new Error('No se encontró un array JSON válido en la respuesta de la IA.');
-                                }
+                                throw new Error('No se encontró un array JSON válido en la respuesta de la IA.');
                             }
 
                             try {
