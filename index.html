@@ -145,7 +145,7 @@
         document.addEventListener('DOMContentLoaded', () => {
             
             const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyGYpHWnMkwsiTYlpDRMuWRP_18y3IAvxZpPuUmLpdwtn6T8NJawt_Wd9wxrsGqWI6H/exec';
-            const API_KEY = 'AIzaSyCdQ058xddc3UFqueRcpwa0JBbLhRj-llE'; // <-- ¡IMPORTANTE! Pegá tu clave de API aquí.
+            const API_KEY = 'AIzaSyCdQ058xddc3UFqueRcpwa0JBbLhRj-llE';
             let productList = [];
             
             const manualPanelHTML = `
@@ -264,10 +264,10 @@
                         const result = await response.json();
                         if (result.candidates && result.candidates[0]?.content?.parts?.[0]) {
                             let rawText = result.candidates[0].content.parts[0].text;
-                            const startIndex = rawText.indexOf('[');
-                            const endIndex = rawText.lastIndexOf(']');
-                            if (startIndex !== -1 && endIndex !== -1) {
-                                const jsonString = rawText.substring(startIndex, endIndex + 1);
+                            // Robust JSON parsing
+                            const jsonMatch = rawText.match(/\[.*\]/s);
+                            if (jsonMatch) {
+                                const jsonString = jsonMatch[0];
                                 const extractedProducts = JSON.parse(jsonString);
                                 let productsAddedCount = 0;
                                 extractedProducts.forEach(p => { if(addProduct(p)) productsAddedCount++; });
