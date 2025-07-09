@@ -291,11 +291,15 @@
                             try {
                                 const extractedProducts = JSON.parse(jsonString);
                                 if (Array.isArray(extractedProducts)) {
-                                    let productsAddedCount = 0;
-                                    extractedProducts.forEach(p => { if(addProduct(p)) productsAddedCount++; });
-                                    renderTable();
-                                    aiStatus.textContent = `¡Éxito! Se agregaron ${productsAddedCount} productos a la tabla.`;
-                                    DOMElements.aiFileInput.value = '';
+                                    if (extractedProducts.length === 0) {
+                                        aiStatus.textContent = 'La IA analizó el archivo pero no encontró productos para agregar.';
+                                    } else {
+                                        let productsAddedCount = 0;
+                                        extractedProducts.forEach(p => { if(addProduct(p)) productsAddedCount++; });
+                                        renderTable();
+                                        aiStatus.textContent = `¡Éxito! Se agregaron ${productsAddedCount} productos a la tabla.`;
+                                        DOMElements.aiFileInput.value = '';
+                                    }
                                 } else {
                                      throw new Error('La respuesta de la IA no es un array, incluso con schema.');
                                 }
