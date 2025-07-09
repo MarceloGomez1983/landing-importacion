@@ -144,7 +144,7 @@
     <script>
         document.addEventListener('DOMContentLoaded', () => {
             
-            const SCRIPT_URL = 'URL_DE_TU_APPS_SCRIPT_AQUI';
+            const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyGYpHWnMkwsiTYlpDRMuWRP_18y3IAvxZpPuUmLpdwtn6T8NJawt_Wd9wxrsGqWI6H/exec';
             let productList = [];
             
             const manualPanelHTML = `
@@ -219,7 +219,7 @@
                 const prompt = `Basado en la siguiente descripción de un producto para importar a Argentina, ¿cuál es el código NCM (Nomenclatura Común del Mercosur) de 8 dígitos más probable? Responde únicamente con el código en formato XXXX.XX.XX, sin ningún texto adicional. Descripción: "${description}"`;
                 try {
                     const payload = { contents: [{ role: "user", parts: [{ text: prompt }] }] };
-                    const apiKey = "";
+                    const apiKey = "AIzaSyCdQ058xddc3UFqueRcpwa0JBbLhRj-llE";
                     const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
                     const response = await fetch(apiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
                     if (!response.ok) {
@@ -270,7 +270,7 @@
                         const prompt = `Analiza la siguiente imagen o documento de una factura proforma. Extrae todos los productos listados y devuelve un array de objetos JSON. Cada objeto debe tener las siguientes claves: "codigo" (string, si no existe usar null), "descripcion" (string), "cantidad" (number), "fob" (number, el valor unitario o total), "ncm" (string, si no existe usar null). Responde únicamente con el array JSON, sin texto adicional, markdown o explicaciones.`;
                         const schema = { type: "ARRAY", items: { type: "OBJECT", properties: { "codigo": { "type": "STRING" }, "descripcion": { "type": "STRING" }, "cantidad": { "type": "NUMBER" }, "fob": { "type": "NUMBER" }, "ncm": { "type": "STRING" } }, required: ["descripcion", "cantidad", "fob"] } };
                         const payload = { contents: [{ role: "user", parts: [ { text: prompt }, { inlineData: { mimeType: mimeType, data: base64Data } } ] }], generationConfig: { responseMimeType: "application/json", responseSchema: schema } };
-                        const apiKey = "";
+                        const apiKey = "AIzaSyCdQ058xddc3UFqueRcpwa0JBbLhRj-llE";
                         const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
                         const response = await fetch(apiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
                         if (!response.ok) {
