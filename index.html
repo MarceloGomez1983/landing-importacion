@@ -257,41 +257,48 @@
                         const mimeType = file.type;
                         aiStatus.textContent = 'Contactando a la IA, esto puede tardar unos segundos...';
                         const prompt = `Analiza la siguiente imagen o documento de una factura proforma. Extrae todos los productos listados y devuelve un array de objetos JSON. Cada objeto debe tener las siguientes claves: "codigo" (string, si no existe usar null), "descripcion" (string), "cantidad" (number), "fob" (number, el valor unitario o total), "ncm" (string, si no existe usar null). Responde únicamente con el array JSON, sin texto adicional, markdown o explicaciones.`;
-                        const payload = { contents: [{ role: "user", parts: [ { text: prompt }, { inlineData: { mimeType: mimeType, data: base64Data } } ] }] };
+                        
+                        // **NUEVA LÓGICA DE SOLICITUD CON SCHEMA**
+                        const schema = {
+                            type: "ARRAY",
+                            items: {
+                                type: "OBJECT",
+                                properties: {
+                                    "codigo": { "type": "STRING" },
+                                    "descripcion": { "type": "STRING" },
+                                    "cantidad": { "type": "NUMBER" },
+                                    "fob": { "type": "NUMBER" },
+                                    "ncm": { "type": "STRING" }
+                                },
+                                required: ["descripcion", "cantidad", "fob"]
+                            }
+                        };
+
+                        const payload = { 
+                            contents: [{ role: "user", parts: [ { text: prompt }, { inlineData: { mimeType: mimeType, data: base64Data } } ] }],
+                            generationConfig: {
+                                responseMimeType: "application/json",
+                                responseSchema: schema
+                            }
+                        };
                         const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${API_KEY}`;
                         const response = await fetch(apiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
                         if (!response.ok) { throw new Error(`La solicitud a la API falló con estado ${response.status}`); }
                         const result = await response.json();
+
                         if (result.candidates && result.candidates[0]?.content?.parts?.[0]) {
-                            let rawText = result.candidates[0].content.parts[0].text;
-                            
-                            // **NUEVA LÓGICA DE PARSEO ROBUSTA**
-                            function extractJsonArray(text) {
-                                const match = text.match(/\[[\s\S]*\]/);
-                                if (match) {
-                                    try {
-                                        JSON.parse(match[0]);
-                                        return match[0];
-                                    } catch (e) {
-                                        // Ignore parsing error and continue
-                                    }
-                                }
-                                return null;
-                            }
-
-                            let jsonString = extractJsonArray(rawText);
-
-                            if (jsonString) {
+                            const jsonString = result.candidates[0].content.parts[0].text;
+                            try {
                                 const extractedProducts = JSON.parse(jsonString);
                                 let productsAddedCount = 0;
                                 extractedProducts.forEach(p => { if(addProduct(p)) productsAddedCount++; });
                                 renderTable();
                                 aiStatus.textContent = `¡Éxito! Se agregaron ${productsAddedCount} productos a la tabla.`;
                                 DOMElements.aiFileInput.value = '';
-                            } else {
-                                throw new Error('No se encontró un array JSON válido en la respuesta de la IA.');
+                            } catch (parseError) {
+                                console.error("JSON Parsing Error:", parseError, "Raw text was:", jsonString);
+                                throw new Error('La respuesta de la IA no tenía el formato JSON esperado, incluso con schema.');
                             }
-
                         } else { throw new Error('Respuesta inesperada de la API de Gemini.'); }
                     } catch (error) {
                         console.error('Error analyzing proforma:', error);
