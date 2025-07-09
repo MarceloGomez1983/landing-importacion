@@ -147,7 +147,6 @@
             const SCRIPT_URL = 'URL_DE_TU_APPS_SCRIPT_AQUI';
             let productList = [];
             
-            // --- Templates HTML para los paneles ---
             const manualPanelHTML = `
                 <div class="p-4 bg-gray-50 rounded-lg border space-y-4">
                     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -169,11 +168,9 @@
                     <div class="mt-4 flex items-center gap-4"><input type="file" id="excel-file-input" accept=".xlsx, .xls, .csv" class="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-white file:text-blue-700 hover:file:bg-blue-100 border rounded-lg"><a href="#" id="downloadTemplateBtn" class="flex-shrink-0 bg-green-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-green-700 text-sm">Descargar Plantilla</a></div>
                 </div>`;
 
-            // --- DOM Element Cache ---
             const DOMElements = {};
 
-            // --- Functions (declared as function expressions) ---
-            const renderTable = () => {
+            function renderTable() {
                 DOMElements.productTableBody.innerHTML = '';
                 if (productList.length === 0) { DOMElements.productTableBody.appendChild(DOMElements.emptyRow); } 
                 else {
@@ -184,27 +181,31 @@
                         DOMElements.productTableBody.appendChild(row);
                     });
                 }
-            };
-            const addProduct = (product) => {
+            }
+
+            function addProduct(product) {
                 if (!product.descripcion || !product.cantidad || !product.fob) { console.warn('Producto incompleto omitido:', product); return false; }
                 productList.push(product);
                 return true;
-            };
-            const handleManualAdd = () => {
+            }
+
+            function handleManualAdd() {
                 const newProduct = { codigo: document.getElementById('manual_codigo').value, descripcion: document.getElementById('manual_descripcion').value, cantidad: document.getElementById('manual_cantidad').value, fob: document.getElementById('manual_fob').value, ncm: document.getElementById('manual_ncm').value };
                 if(addProduct(newProduct)) {
                     document.getElementById('manual_codigo').value = ''; document.getElementById('manual_descripcion').value = ''; document.getElementById('manual_cantidad').value = ''; document.getElementById('manual_fob').value = ''; document.getElementById('manual_ncm').value = '';
                 }
                 renderTable();
-            };
-            const switchTab = (tabKey) => {
+            }
+
+            function switchTab(tabKey) {
                 Object.keys(DOMElements.tabs).forEach(key => {
                     const isActive = key === tabKey;
                     DOMElements.tabs[key].btn.classList.toggle('active', isActive);
                     DOMElements.tabs[key].panel.classList.toggle('hidden', !isActive);
                 });
-            };
-            const handleSuggestNcm = async () => {
+            }
+
+            async function handleSuggestNcm() {
                 const description = document.getElementById('manual_descripcion').value;
                 if (!description.trim()) {
                     alert('Por favor, ingresá una descripción del producto para sugerir el NCM.');
@@ -217,35 +218,39 @@
                 spinnerIcon.classList.remove('hidden');
                 const prompt = `Basado en la siguiente descripción de un producto para importar a Argentina, ¿cuál es el código NCM (Nomenclatura Común del Mercosur) de 8 dígitos más probable? Responde únicamente con el código en formato XXXX.XX.XX, sin ningún texto adicional. Descripción: "${description}"`;
                 try {
-                    // Using gemini-pro for this text-only task for stability
-                    const payload = { 
-                        contents: [{ role: "user", parts: [{ text: prompt }] }],
-                        generationConfig: {
-                            "temperature": 0.2,
-                            "maxOutputTokens": 50
-                        }
-                    };
+                    const payload = { contents: [{ role: "user", parts: [{ text: prompt }] }] };
                     const apiKey = "";
-                    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${apiKey}`;
+                    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
                     const response = await fetch(apiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-                    if (!response.ok) { throw new Error(`API request failed with status ${response.status}`); }
+                    if (!response.ok) {
+                        const errorBody = await response.text();
+                        console.error('API Error Response:', errorBody);
+                        throw new Error(`La solicitud a la API falló con estado ${response.status}`);
+                    }
                     const result = await response.json();
                     if (result.candidates && result.candidates[0]?.content?.parts?.[0]) {
                         let text = result.candidates[0].content.parts[0].text;
                         const ncmMatch = text.match(/\d{4}\.\d{2}\.\d{2}/);
                         if (ncmMatch) { document.getElementById('manual_ncm').value = ncmMatch[0]; } 
-                        else { alert('La IA no pudo determinar un código NCM válido. Por favor, intentá con una descripción más detallada.'); }
-                    } else { throw new Error('Respuesta inesperada de la API de Gemini.'); }
+                        else { 
+                            console.warn("IA response didn't contain a valid NCM:", text);
+                            alert('La IA no pudo determinar un código NCM válido. Por favor, intentá con una descripción más detallada.'); 
+                        }
+                    } else { 
+                        console.error('Unexpected API response structure:', result);
+                        throw new Error('Respuesta inesperada de la API de Gemini.'); 
+                    }
                 } catch (error) {
                     console.error('Error fetching NCM suggestion:', error);
-                    alert('Hubo un error al contactar al servicio de IA. Por favor, intentá de nuevo más tarde.');
+                    alert(`Hubo un error al contactar al servicio de IA. Por favor, intentá de nuevo más tarde. (Detalle: ${error.message})`);
                 } finally {
                     DOMElements.suggestNcmBtn.disabled = false;
                     spinnerIcon.classList.add('hidden');
                     sparkleIcon.classList.remove('hidden');
                 }
-            };
-            const handleAnalyzeProforma = async () => {
+            }
+
+            async function handleAnalyzeProforma() {
                 const file = DOMElements.aiFileInput.files[0];
                 if (!file) { alert('Por favor, seleccioná un archivo de proforma para analizar.'); return; }
                 const analyzeBtnText = document.getElementById('analyzeBtnText');
@@ -268,7 +273,11 @@
                         const apiKey = "";
                         const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
                         const response = await fetch(apiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-                        if (!response.ok) { throw new Error(`API request failed with status ${response.status}`); }
+                        if (!response.ok) {
+                            const errorBody = await response.text();
+                            console.error('API Error Response:', errorBody);
+                            throw new Error(`La solicitud a la API falló con estado ${response.status}`);
+                        }
                         const result = await response.json();
                         if (result.candidates && result.candidates[0]?.content?.parts?.[0]) {
                             const extractedProducts = JSON.parse(result.candidates[0].content.parts[0].text);
@@ -277,18 +286,22 @@
                             renderTable();
                             aiStatus.textContent = `¡Éxito! Se agregaron ${productsAddedCount} productos a la tabla.`;
                             DOMElements.aiFileInput.value = '';
-                        } else { throw new Error('Respuesta inesperada de la API de Gemini.'); }
+                        } else { 
+                            console.error('Unexpected API response structure:', result);
+                            throw new Error('Respuesta inesperada de la API de Gemini.'); 
+                        }
                     } catch (error) {
                         console.error('Error analyzing proforma:', error);
-                        aiStatus.textContent = 'Error: No se pudo analizar el archivo. Intentá con una imagen más clara.';
+                        aiStatus.textContent = `Error: No se pudo analizar el archivo. (Detalle: ${error.message})`;
                     } finally {
                         DOMElements.analyzeBtn.disabled = false;
                         analyzeBtnText.textContent = 'Analizar Archivo';
                         analyzeSpinner.classList.add('hidden');
                     }
                 };
-            };
-            const handleFormSubmit = (event) => {
+            }
+
+            function handleFormSubmit(event) {
                 event.preventDefault();
                 if (SCRIPT_URL === 'URL_DE_TU_APPS_SCRIPT_AQUI') { alert('ERROR: Por favor, configurá la URL de Google Apps Script en el archivo HTML.'); return; }
                 if (productList.length === 0) { alert('Por favor, agregá al menos un producto para cotizar.'); return; }
@@ -298,9 +311,21 @@
                 .then(() => { DOMElements.form.classList.add('hidden'); DOMElements.successMessage.classList.remove('hidden'); DOMElements.successMessage.scrollIntoView({ behavior: 'smooth', block: 'center' }); })
                 .catch(error => { console.error('Error:', error); DOMElements.errorMessage.classList.remove('hidden'); })
                 .finally(() => { DOMElements.submitBtn.disabled = false; DOMElements.submitBtn.textContent = 'Enviar y Recibir Presupuesto'; });
-            };
-            const handleDownloadTemplate = () => { const headers = ["Codigo Producto", "Descripcion", "Cantidad", "Valor FOB (USD)", "NCM"]; const csvContent = "data:text/csv;charset=utf-8," + headers.join(",") + "\n"; const encodedUri = encodeURI(csvContent); const link = document.createElement("a"); link.setAttribute("href", encodedUri); link.setAttribute("download", "plantilla_importacion.csv"); document.body.appendChild(link); link.click(); document.body.removeChild(link); };
-            const handleExcelUpload = (event) => {
+            }
+
+            function handleDownloadTemplate() { 
+                const headers = ["Codigo Producto", "Descripcion", "Cantidad", "Valor FOB (USD)", "NCM"]; 
+                const csvContent = "data:text/csv;charset=utf-8," + headers.join(",") + "\n"; 
+                const encodedUri = encodeURI(csvContent); 
+                const link = document.createElement("a"); 
+                link.setAttribute("href", encodedUri); 
+                link.setAttribute("download", "plantilla_importacion.csv"); 
+                document.body.appendChild(link); 
+                link.click(); 
+                document.body.removeChild(link); 
+            }
+
+            function handleExcelUpload(event) {
                 const file = event.target.files[0]; if (!file) return;
                 const reader = new FileReader();
                 reader.onload = (e) => {
@@ -316,8 +341,7 @@
                 };
                 reader.readAsArrayBuffer(file); 
                 event.target.value = '';
-            };
-
+            }
 
             // --- Start the application ---
             function init() {
