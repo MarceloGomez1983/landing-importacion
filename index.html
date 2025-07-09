@@ -258,7 +258,7 @@
                         aiStatus.textContent = 'Contactando a la IA, esto puede tardar unos segundos...';
                         
                         // **NUEVA LÓGICA DE SOLICITUD CON SCHEMA**
-                        const prompt = `Analiza la siguiente imagen o documento de una factura proforma. Extrae todos los productos listados y devuelve un array de objetos JSON. Cada objeto debe tener las siguientes claves: "codigo" (string, si no existe usar null), "descripcion" (string), "cantidad" (number), "fob" (number, el valor unitario o total), "ncm" (string, si no existe usar null). Si no encuentras ningún producto o no puedes analizar el archivo, responde únicamente con un array vacío: []. Responde únicamente con el array JSON, sin texto adicional, markdown o explicaciones.`;
+                        const prompt = `Tu tarea es analizar la imagen o documento de una factura proforma y extraer los productos. Debes responder *únicamente* con un array de objetos JSON. Cada objeto debe tener estas claves: "codigo" (string, si no existe usa null), "descripcion" (string), "cantidad" (number), "fob" (number), "ncm" (string, si no existe usa null). Es CRÍTICO que tu respuesta sea solo el array JSON. Si el archivo es ilegible o no contiene productos, tu ÚNICA respuesta debe ser un array vacío: []. No incluyas explicaciones, texto adicional, ni markdown.`;
                         const schema = {
                             type: "ARRAY",
                             items: {
