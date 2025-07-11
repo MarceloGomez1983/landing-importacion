@@ -15,9 +15,6 @@
     
     <!-- SheetJS (xlsx.js) para leer archivos de Excel -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-
-    <!-- PDF.js para procesar archivos PDF -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.102/pdf.min.js"></script>
     
     <!-- Favicon (Icono de la pestaña) -->
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🚢</text></svg>">
@@ -90,7 +87,7 @@
                         <div class="flex border-b mb-6">
                             <button type="button" id="tab-manual" class="tab-btn active font-semibold">Carga Manual</button>
                             <button type="button" id="tab-excel" class="tab-btn text-gray-500 font-semibold">Carga Rápida (Excel)</button>
-                            <button type="button" id="tab-ai" class="tab-btn text-gray-500 font-semibold flex items-center gap-2">Análisis IA (Proforma) <span class="bg-yellow-200 text-yellow-800 text-xs font-bold px-2 py-0.5 rounded-full">NUEVO</span></button>
+                            <button type="button" id="tab-ai" class="tab-btn text-gray-500 font-semibold flex items-center gap-2">Análisis IA (Imagen) <span class="bg-yellow-200 text-yellow-800 text-xs font-bold px-2 py-0.5 rounded-full">NUEVO</span></button>
                         </div>
                         
                         <div id="panel-manual">
@@ -119,9 +116,9 @@
                         <div id="panel-ai" class="hidden">
                             <div class="p-4 bg-blue-50 border-l-4 border-blue-400 text-blue-800 rounded-r-lg">
                                 <p class="font-semibold">Extraé productos automáticamente desde una proforma.</p>
-                                <p class="text-sm mt-1">Subí una imagen (JPG, PNG) o un PDF de tu proforma y nuestra IA la analizará por vos.</p>
+                                <p class="text-sm mt-1">Subí una imagen (JPG, PNG) de tu proforma y nuestra IA la analizará por vos.</p>
                                 <div class="mt-4">
-                                    <input type="file" id="ai-file-input" accept=".pdf,.jpg,.jpeg,.png" class="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-white file:text-blue-700 hover:file:bg-blue-100 border rounded-lg">
+                                    <input type="file" id="ai-file-input" accept=".jpg,.jpeg,.png" class="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-white file:text-blue-700 hover:file:bg-blue-100 border rounded-lg">
                                 </div>
                                 <div id="ai-status" class="mt-2 text-sm"></div>
                                 <button type="button" id="analyzeBtn" class="mt-4 bg-indigo-600 text-white font-semibold px-6 py-2 rounded-lg hover:bg-indigo-700 flex items-center justify-center gap-2">
@@ -161,12 +158,6 @@
 
     <script>
         window.addEventListener('load', () => {
-            
-            if (typeof pdfjsLib !== 'undefined') {
-                pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.102/pdf.worker.min.js`;
-            } else {
-                console.error("PDF.js library failed to load. PDF analysis will be disabled.");
-            }
 
             const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyGYpHWnMkwsiTYlpDRMuWRP_18y3IAvxZpPuUmLpdwtn6T8NJawt_Wd9wxrsGqWI6H/exec';
             const API_KEY = 'AIzaSyCdQ058xddc3UFqueRcpwa0JBbLhRj-llE';
@@ -184,6 +175,9 @@
                     excel: { btn: document.getElementById('tab-excel'), panel: document.getElementById('panel-excel') },
                     ai: { btn: document.getElementById('tab-ai'), panel: document.getElementById('panel-ai') }
                 },
+                manualPanel: document.getElementById('panel-manual'),
+                excelPanel: document.getElementById('panel-excel'),
+                aiPanel: document.getElementById('panel-ai'),
                 addProductBtn: document.getElementById('addProductBtn'),
                 suggestNcmBtn: document.getElementById('suggestNcmBtn'),
                 excelFileInput: document.getElementById('excel-file-input'),
@@ -261,10 +255,6 @@
 
             async function handleAnalyzeProforma() {
                 if (API_KEY === 'TU_CLAVE_DE_API_AQUI') { alert('ERROR: Por favor, configurá tu clave de API de Google en el archivo HTML.'); return; }
-                if (typeof pdfjsLib === 'undefined' || !pdfjsLib.GlobalWorkerOptions.workerSrc) {
-                    alert('Error: La librería para procesar PDF no se cargó correctamente. Por favor, recargá la página.');
-                    return;
-                }
                 const file = DOMElements.aiFileInput.files[0];
                 if (!file) { alert('Por favor, seleccioná un archivo de proforma para analizar.'); return; }
                 const analyzeBtnText = document.getElementById('analyzeBtnText');
@@ -274,101 +264,73 @@
                 analyzeBtnText.textContent = 'Analizando...';
                 analyzeSpinner.classList.remove('hidden');
                 aiStatus.textContent = 'Leyendo archivo...';
-
-                try {
-                    let fileParts = [];
-                    if (file.type === "application/pdf") {
-                        aiStatus.textContent = 'Procesando PDF... (esto puede tardar un poco)';
-                        const fileReader = new FileReader();
-                        fileReader.readAsArrayBuffer(file);
-                        await new Promise((resolve, reject) => {
-                            fileReader.onload = resolve;
-                            fileReader.onerror = reject;
-                        });
-                        
-                        const pdf = await pdfjsLib.getDocument(fileReader.result).promise;
-                        for (let i = 1; i <= pdf.numPages; i++) {
-                            aiStatus.textContent = `Convirtiendo página ${i} de ${pdf.numPages} a imagen...`;
-                            const page = await pdf.getPage(i);
-                            const viewport = page.getViewport({ scale: 2.0 });
-                            const canvas = document.createElement('canvas');
-                            const context = canvas.getContext('2d');
-                            canvas.height = viewport.height;
-                            canvas.width = viewport.width;
-                            await page.render({ canvasContext: context, viewport: viewport }).promise;
-                            const base64Data = canvas.toDataURL('image/jpeg').split(',')[1];
-                            fileParts.push({ inlineData: { mimeType: 'image/jpeg', data: base64Data } });
-                        }
-                    } else {
-                        const reader = new FileReader();
-                        reader.readAsDataURL(file);
-                        await new Promise((resolve, reject) => {
-                           reader.onloadend = resolve;
-                           reader.onerror = reject;
-                        });
+                const reader = new FileReader();
+                reader.readAsDataURL(file);
+                reader.onloadend = async () => {
+                    try {
                         const base64Data = reader.result.split(',')[1];
-                        fileParts.push({ inlineData: { mimeType: file.type, data: base64Data } });
-                    }
-
-                    aiStatus.textContent = 'Contactando a la IA, esto puede tardar unos segundos...';
-                    const prompt = `Tu tarea es analizar la/s siguiente/s imagen/es de una factura proforma y extraer los productos. Debes responder *únicamente* con un array de objetos JSON. Cada objeto debe tener estas claves: "codigo" (string, si no existe usa null), "descripcion" (string), "cantidad" (number), "fob" (number), "ncm" (string, si no existe usa null). Es CRÍTICO que tu respuesta sea solo el array JSON. Si el archivo es ilegible o no contiene productos, tu ÚNICA respuesta debe ser un array vacío: []. No incluyas explicaciones, texto adicional, ni markdown.`;
-                    const schema = {
-                        type: "ARRAY",
-                        items: {
-                            type: "OBJECT",
-                            properties: {
-                                "codigo": { "type": "STRING" },
-                                "descripcion": { "type": "STRING" },
-                                "cantidad": { "type": "NUMBER" },
-                                "fob": { "type": "NUMBER" },
-                                "ncm": { "type": "STRING" }
-                            },
-                            required: ["descripcion", "cantidad", "fob"]
-                        }
-                    };
-
-                    const payload = { 
-                        contents: [{ role: "user", parts: [ { text: prompt }, ...fileParts ] }],
-                        generationConfig: {
-                            responseMimeType: "application/json",
-                            responseSchema: schema
-                        }
-                    };
-                    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${API_KEY}`;
-                    const response = await fetch(apiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-                    if (!response.ok) { throw new Error(`La solicitud a la API falló con estado ${response.status}`); }
-                    const result = await response.json();
-
-                    if (result.candidates && result.candidates[0]?.content?.parts?.[0]) {
-                        const jsonString = result.candidates[0].content.parts[0].text;
-                        try {
-                            const extractedProducts = JSON.parse(jsonString);
-                            if (Array.isArray(extractedProducts)) {
-                                if (extractedProducts.length === 0) {
-                                    aiStatus.textContent = 'La IA analizó el archivo pero no encontró productos para agregar.';
-                                } else {
-                                    let productsAddedCount = 0;
-                                    extractedProducts.forEach(p => { if(addProduct(p)) productsAddedCount++; });
-                                    renderTable();
-                                    aiStatus.textContent = `¡Éxito! Se agregaron ${productsAddedCount} productos a la tabla.`;
-                                    DOMElements.aiFileInput.value = '';
-                                }
-                            } else {
-                                 throw new Error('La respuesta de la IA no es un array, incluso con schema.');
+                        const mimeType = file.type;
+                        aiStatus.textContent = 'Contactando a la IA, esto puede tardar unos segundos...';
+                        
+                        const prompt = `Tu tarea es analizar la/s siguiente/s imagen/es de una factura proforma y extraer los productos. Debes responder *únicamente* con un array de objetos JSON. Cada objeto debe tener estas claves: "codigo" (string, si no existe usa null), "descripcion" (string), "cantidad" (number), "fob" (number), "ncm" (string, si no existe usa null). Es CRÍTICO que tu respuesta sea solo el array JSON. Si el archivo es ilegible o no contiene productos, tu ÚNICA respuesta debe ser un array vacío: []. No incluyas explicaciones, texto adicional, ni markdown.`;
+                        const schema = {
+                            type: "ARRAY",
+                            items: {
+                                type: "OBJECT",
+                                properties: {
+                                    "codigo": { "type": "STRING" },
+                                    "descripcion": { "type": "STRING" },
+                                    "cantidad": { "type": "NUMBER" },
+                                    "fob": { "type": "NUMBER" },
+                                    "ncm": { "type": "STRING" }
+                                },
+                                required: ["descripcion", "cantidad", "fob"]
                             }
-                        } catch (parseError) {
-                            console.error("JSON Parsing Error:", parseError, "Raw text was:", jsonString);
-                            throw new Error('La respuesta de la IA no tenía el formato JSON esperado.');
-                        }
-                    } else { throw new Error('Respuesta inesperada de la API de Gemini.'); }
-                } catch (error) {
-                    console.error('Error analyzing proforma:', error);
-                    aiStatus.textContent = `Error: No se pudo analizar el archivo. (Detalle: ${error.message})`;
-                } finally {
-                    DOMElements.analyzeBtn.disabled = false;
-                    analyzeBtnText.textContent = 'Analizar Archivo';
-                    analyzeSpinner.classList.add('hidden');
-                }
+                        };
+
+                        const payload = { 
+                            contents: [{ role: "user", parts: [ { text: prompt }, { inlineData: { mimeType: mimeType, data: base64Data } } ] }],
+                            generationConfig: {
+                                responseMimeType: "application/json",
+                                responseSchema: schema
+                            }
+                        };
+                        const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${API_KEY}`;
+                        const response = await fetch(apiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                        if (!response.ok) { throw new Error(`La solicitud a la API falló con estado ${response.status}`); }
+                        const result = await response.json();
+
+                        if (result.candidates && result.candidates[0]?.content?.parts?.[0]) {
+                            const jsonString = result.candidates[0].content.parts[0].text;
+                            try {
+                                const extractedProducts = JSON.parse(jsonString);
+                                if (Array.isArray(extractedProducts)) {
+                                    if (extractedProducts.length === 0) {
+                                        aiStatus.textContent = 'La IA analizó el archivo pero no encontró productos para agregar.';
+                                    } else {
+                                        let productsAddedCount = 0;
+                                        extractedProducts.forEach(p => { if(addProduct(p)) productsAddedCount++; });
+                                        renderTable();
+                                        aiStatus.textContent = `¡Éxito! Se agregaron ${productsAddedCount} productos a la tabla.`;
+                                        DOMElements.aiFileInput.value = '';
+                                    }
+                                } else {
+                                     throw new Error('La respuesta de la IA no es un array, incluso con schema.');
+                                }
+                            } catch (parseError) {
+                                console.error("JSON Parsing Error:", parseError, "Raw text was:", jsonString);
+                                throw new Error('La respuesta de la IA no tenía el formato JSON esperado.');
+                            }
+                        } else { throw new Error('Respuesta inesperada de la API de Gemini.'); }
+                    } catch (error) {
+                        console.error('Error analyzing proforma:', error);
+                        aiStatus.textContent = `Error: No se pudo analizar el archivo. (Detalle: ${error.message})`;
+                    } finally {
+                        DOMElements.analyzeBtn.disabled = false;
+                        analyzeBtnText.textContent = 'Analizar Archivo';
+                        analyzeSpinner.classList.add('hidden');
+                    }
+                };
             }
 
             function handleFormSubmit(event) {
@@ -413,47 +375,22 @@
                 event.target.value = '';
             }
 
-            function init() {
-                DOMElements.form = document.getElementById('cotizacionForm');
-                DOMElements.submitBtn = document.getElementById('submitBtn');
-                DOMElements.successMessage = document.getElementById('successMessage');
-                DOMElements.errorMessage = document.getElementById('errorMessage');
-                DOMElements.productTableBody = document.getElementById('product-table-body');
-                DOMElements.emptyRow = document.getElementById('empty-row');
-                DOMElements.tabs = {
-                    manual: { btn: document.getElementById('tab-manual'), panel: document.getElementById('panel-manual') },
-                    excel: { btn: document.getElementById('tab-excel'), panel: document.getElementById('panel-excel') },
-                    ai: { btn: document.getElementById('tab-ai'), panel: document.getElementById('panel-ai') }
-                };
-                
-                DOMElements.tabs.manual.panel.innerHTML = manualPanelHTML;
-                DOMElements.tabs.excel.panel.innerHTML = excelPanelHTML;
-
-                DOMElements.addProductBtn = document.getElementById('addProductBtn');
-                DOMElements.suggestNcmBtn = document.getElementById('suggestNcmBtn');
-                DOMElements.excelFileInput = document.getElementById('excel-file-input');
-                DOMElements.downloadTemplateBtn = document.getElementById('downloadTemplateBtn');
-                DOMElements.aiFileInput = document.getElementById('ai-file-input');
-                DOMElements.analyzeBtn = document.getElementById('analyzeBtn');
-
-                Object.keys(DOMElements.tabs).forEach(key => DOMElements.tabs[key].btn.addEventListener('click', () => switchTab(key)));
-                DOMElements.addProductBtn.addEventListener('click', handleManualAdd);
-                DOMElements.suggestNcmBtn.addEventListener('click', handleSuggestNcm);
-                DOMElements.excelFileInput.addEventListener('change', handleExcelUpload);
-                DOMElements.downloadTemplateBtn.addEventListener('click', (e) => { e.preventDefault(); handleDownloadTemplate(); });
-                DOMElements.analyzeBtn.addEventListener('click', handleAnalyzeProforma);
-                DOMElements.productTableBody.addEventListener('click', (event) => { 
-                    if (event.target.classList.contains('delete-btn')) { 
-                        const index = event.target.dataset.index; 
-                        productList.splice(index, 1); 
-                        renderTable(); 
-                    } 
-                });
-                DOMElements.form.addEventListener('submit', handleFormSubmit);
-            }
-
-            init();
-        };
+            // Bind events to the DOM elements
+            Object.keys(DOMElements.tabs).forEach(key => DOMElements.tabs[key].btn.addEventListener('click', () => switchTab(key)));
+            DOMElements.addProductBtn.addEventListener('click', handleManualAdd);
+            DOMElements.suggestNcmBtn.addEventListener('click', handleSuggestNcm);
+            DOMElements.excelFileInput.addEventListener('change', handleExcelUpload);
+            DOMElements.downloadTemplateBtn.addEventListener('click', (e) => { e.preventDefault(); handleDownloadTemplate(); });
+            DOMElements.analyzeBtn.addEventListener('click', handleAnalyzeProforma);
+            DOMElements.productTableBody.addEventListener('click', (event) => { 
+                if (event.target.classList.contains('delete-btn')) { 
+                    const index = event.target.dataset.index; 
+                    productList.splice(index, 1); 
+                    renderTable(); 
+                } 
+            });
+            DOMElements.form.addEventListener('submit', handleFormSubmit);
+        });
     </script>
 
 </body>
